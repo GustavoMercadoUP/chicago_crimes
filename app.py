@@ -140,17 +140,32 @@ metric_prec = st.session_state.metric_prec
 metric_rec = st.session_state.metric_rec
 
 # =========================================================
-# PREPROCESAMIENTO DE CHUNKS (Adaptado del Notebook)
+# PREPROCESAMIENTO DE CHUNKS
 # =========================================================
 def preprocess_chunk(df_chunk):
+    # Asegurar que las columnas clave existan antes de procesar
+    cols_needed = ['latitude', 'longitude', 'domestic', 'district']
+    for col in cols_needed:
+        if col not in df_chunk.columns:
+            return pd.DataFrame(), pd.Series()
+
+    # ✨ SOLUCIÓN AL ERROR: Forzar la conversión a tipo numérico ignorando textos corruptos
+    df_chunk['latitude'] = pd.to_numeric(df_chunk['latitude'], errors='coerce')
+    df_chunk['longitude'] = pd.to_numeric(df_chunk['longitude'], errors='coerce')
+
+    # Eliminar nulos generados por la conversión o los originales
     df_chunk = df_chunk.dropna(subset=['latitude', 'longitude', 'domestic', 'district']).copy()
     
     # Límites geográficos de Chicago
+    min_latitude, max_latitude = 41.644, 42.023
+    min_longitude, max_longitude = -87.940, -87.524
+
     df_chunk = df_chunk[
-        df_chunk['latitude'].between(41.644, 42.023) &
-        df_chunk['longitude'].between(-87.940, -87.524)
+        df_chunk['latitude'].between(min_latitude, max_latitude) &
+        df_chunk['longitude'].between(min_longitude, max_longitude)
     ].copy()
 
+    # Procesamiento de fechas
     df_chunk['date'] = pd.to_datetime(df_chunk['date'], utc=True, errors='coerce')
     df_chunk = df_chunk.dropna(subset=['date']).copy()
 
@@ -167,6 +182,10 @@ def preprocess_chunk(df_chunk):
         'latitude', 'longitude', 'day_of_week', 'month', 'hour_of_day', 'is_weekend'
     ]
     
+    # Devolver un dataframe vacío si el filtrado dejó el lote sin registros válidos
+    if df_chunk.empty:
+        return pd.DataFrame(), pd.Series()
+
     return df_chunk[features], df_chunk['arrest']
 
 # =========================================================
@@ -195,7 +214,11 @@ def process_single_blob(bucket_name, blob_name, limite, chunksize):
                 continue
 
             X_chunk, y_chunk = preprocess_chunk(chunk)
-
+            
+            # CONTROL DE SEGURIDAD: Si el lote quedó vacío tras la limpieza, saltar al siguiente chunk
+            if X_chunk.empty:
+                continue
+    
             for idx, row in X_chunk.iterrows():
                 if count >= limite:
                     break
