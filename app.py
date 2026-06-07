@@ -270,10 +270,11 @@ def process_single_blob(bucket_name, blob_name, limite, chunksize):
         return None
 
 # =========================================================
-# CONTROLADOR DE PROCESAMIENTO MIGRADO (Individual y Bloques)
+# CONTROLADOR DE PROCESAMIENTO MIGRADO (Piloto Automático Seguro)
 # =========================================================
 st.subheader("Flujo de Simulación en Tiempo Real")
 
+# Inicializar los blobs si no existen en la sesión
 if st.session_state.blobs is None:
     client = storage.Client()
     bucket = client.bucket(bucket_name)
@@ -282,14 +283,21 @@ if st.session_state.blobs is None:
     st.session_state.blobs = blobs
     st.session_state.index = 0
 
+# Inicializar la variable de control para el Piloto Automático
+if "auto_pilot_remaining" not in st.session_state:
+    st.session_state.auto_pilot_remaining = 0
+
 blobs = st.session_state.blobs
 idx = st.session_state.index
 
+# Creamos dos columnas para organizar visualmente los botones
 btn_col1, btn_col2 = st.columns(2)
 
 # --- OPCIÓN 1: PROCESAR UN SOLO ARCHIVO ---
 with btn_col1:
-    if st.button("Procesar Siguiente Archivo ➡️"):
+    # El botón se deshabilita automáticamente si el piloto automático está corriendo
+    disabled_btn = st.session_state.auto_pilot_remaining > 0
+    if st.button("Procesar Siguiente Archivo ➡️", disabled=disabled_btn):
         if idx >= len(blobs):
             st.success("¡Todos los lotes de crímenes han sido procesados!")
         else:
@@ -297,55 +305,59 @@ with btn_col1:
             short_name = blob.name.split("/")[-1]
             st.info(f"Procesando lote {idx + 1}/{len(blobs)}: `{short_name}`")
             
-            with st.spinner("Entrenando..."):
+            with st.spinner("Entrenando ARFClassifier..."):
                 result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
             
             if result is not None:
-                # Guardamos las tuplas globales y locales
                 st.session_state.history.append((result["global_acc"], result["global_prec"], result["global_rec"]))
                 st.session_state.history_file.append((result["file_acc"], result["file_prec"], result["file_rec"]))
                 st.session_state.processed_files.append(short_name)
-                st.success("¡Lote procesado en memoria!")
             
             st.session_state.index += 1
             st.rerun()
 
-# --- OPCIÓN 2: PROCESAR EN BLOQUE (RÁFAGA DE 50) ---
+# --- OPCIÓN 2: PILOTO AUTOMÁTICO RE-DISEÑADO (Evita Timeouts) ---
 with btn_col2:
-    num_bloque = st.number_input("Archivos a procesar en ráfaga:", value=50, min_value=1, max_value=100, step=10)
-    if st.button("🚀 Procesar Bloque en Ráfaga"):
-        if idx >= len(blobs):
-            st.success("¡Todos los lotes ya han sido procesados!")
-        else:
+    if st.session_state.auto_pilot_remaining == 0:
+        num_bloque = st.number_input("Archivos a procesar en ráfaga:", value=50, min_value=1, max_value=100, step=10)
+        if st.button("🚀 Iniciar Piloto Automático"):
             archivos_restantes = len(blobs) - idx
-            iteraciones = min(int(num_bloque), archivos_restantes)
-            
-            progreso_bar = st.progress(0.0)
-            status_text = st.empty()
-            
-            for i in range(iteraciones):
-                actual_idx = st.session_state.index
-                if actual_idx >= len(blobs):
-                    break
-                blob = blobs[actual_idx]
-                short_name = blob.name.split("/")[-1]
-                
-                status_text.markdown(f"⚡ Ráfaga: Procesando {i+1}/{iteraciones} (`{short_name}`)...")
-                
-                result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
-                
-                if result is not None:
-                    # Guardamos la tupla en la ráfaga de forma idéntica
-                    st.session_state.history.append((result["global_acc"], result["global_prec"], result["global_rec"]))
-                    st.session_state.history_file.append((result["file_acc"], result["file_prec"], result["file_rec"]))
-                    st.session_state.processed_files.append(short_name)
-                
-                st.session_state.index += 1
-                progreso_bar.progress((i + 1) / iteraciones)
-            
-            status_text.empty()
-            progreso_bar.empty()
+            st.session_state.auto_pilot_remaining = min(int(num_bloque), archivos_restantes)
             st.rerun()
+    else:
+        # Permite al usuario frenar la ráfaga de forma segura si lo desea
+        if st.button("🛑 Detener Piloto Automático"):
+            st.session_state.auto_pilot_remaining = 0
+            st.warning("Piloto automático detenido por el usuario.")
+            st.rerun()
+
+# --- EJECUCIÓN DEL PILOTO AUTOMÁTICO (Ciclo continuo por recarga de página) ---
+if st.session_state.auto_pilot_remaining > 0:
+    if idx >= len(blobs):
+        st.session_state.auto_pilot_remaining = 0
+        st.success("¡Todos los archivos del bucket han sido procesados por completo!")
+    else:
+        blob = blobs[idx]
+        short_name = blob.name.split("/")[-1]
+        
+        # Banner informativo sobre el estado de la ráfaga automática
+        st.warning(f"🤖 **Modo Piloto Automático Activo.** Quedan **{st.session_state.auto_pilot_remaining}** archivos en esta ráfaga.")
+        st.info(f"Procesando dinámicamente: `{short_name}` (Índice global: {idx + 1})")
+        
+        # Procesamos el archivo actual
+        result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
+        
+        if result is not None:
+            st.session_state.history.append((result["global_acc"], result["global_prec"], result["global_rec"]))
+            st.session_state.history_file.append((result["file_acc"], result["file_prec"], result["file_rec"]))
+            st.session_state.processed_files.append(short_name)
+        
+        # Actualizamos contadores de control
+        st.session_state.auto_pilot_remaining -= 1
+        st.session_state.index += 1
+        
+        # Recarga inmediata: refresca la UI, dibuja un nuevo punto en los gráficos y pasa al siguiente CSV
+        st.rerun()
 
 # =========================================================
 # INDICADORES EN PANTALLA (KPIs)
