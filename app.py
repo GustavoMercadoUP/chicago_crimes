@@ -251,54 +251,94 @@ def process_single_blob(bucket_name, blob_name, limite, chunksize):
         return None
 
 # =========================================================
-# CONTROLADOR DE PROCESAMIENTO MIGRADO
+# CONTROLADOR DE PROCESAMIENTO MIGRADO (Individual y Bloques)
 # =========================================================
 st.subheader("Flujo de Simulación en Tiempo Real")
 
-if st.button("Procesar Siguiente Archivo ➡️"):
-    if st.session_state.blobs is None:
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blobs = list(bucket.list_blobs(prefix=prefix))
-        blobs = [b for b in blobs if b.name.lower().endswith(".csv")]
-        st.session_state.blobs = blobs
-        st.session_state.index = 0
+# Inicializar los blobs si no existen en la sesión
+if st.session_state.blobs is None:
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blobs = list(bucket.list_blobs(prefix=prefix))
+    blobs = [b for b in blobs if b.name.lower().endswith(".csv")]
+    st.session_state.blobs = blobs
+    st.session_state.index = 0
 
-    blobs = st.session_state.blobs
-    idx = st.session_state.index
+blobs = st.session_state.blobs
+idx = st.session_state.index
 
-    if idx >= len(blobs):
-        st.success("¡Todos los lotes de crímenes han sido procesados con éxito!")
-    else:
-        blob = blobs[idx]
-        short_name = blob.name.split("/")[-1]
+# Creamos dos columnas para colocar los botones lado a lado
+btn_col1, btn_col2 = st.columns(2)
 
-        st.info(f"Procesando lote {idx + 1}/{len(blobs)}: `{short_name}`")
-        
-        with st.spinner("El árbol aleatorio adaptativo está aprendiendo del archivo..."):
-            result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
-
-        if result is not None:
-            # Almacenar métricas globales históricas
-            st.session_state.history_acc.append(result["global_acc"])
-            st.session_state.history_prec.append(result["global_prec"])
-            st.session_state.history_rec.append(result["global_rec"])
-
-            # Almacenar métricas específicas del archivo
-            st.session_state.history_file_acc.append(result["file_acc"])
-            st.session_state.history_file_prec.append(result["file_prec"])
-            st.session_state.history_file_rec.append(result["file_rec"])
-
-            st.session_state.processed_files.append(short_name)
-            
-            # 💡 ELIMINADO: Ya no guardamos en GCS aquí. 
-            # El modelo ahora entrena 100% en la RAM ultra rápida de 8GiB.
-            st.success("¡Lote procesado en memoria! Recuerda guardar el checkpoint desde la barra lateral al terminar.")
-            
+# --- OPCIÓN 1: PROCESAR UN SOLO ARCHIVO ---
+with btn_col1:
+    if st.button("Procesar Siguiente Archivo ➡️"):
+        if idx >= len(blobs):
+            st.success("¡Todos los lotes de crímenes han sido procesados con éxito!")
         else:
-            st.warning("El archivo actual no contenía registros válidos tras la limpieza.")
+            blob = blobs[idx]
+            short_name = blob.name.split("/")[-1]
+            st.info(f"Procesando lote {idx + 1}/{len(blobs)}: `{short_name}`")
+            
+            with st.spinner("Entrenando..."):
+                result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
+            
+            if result is not None:
+                st.session_state.history_acc.append(result["global_acc"])
+                st.session_state.history_prec.append(result["global_prec"])
+                st.session_state.history_rec.append(result["global_rec"])
+                st.session_state.history_file_acc.append(result["file_acc"])
+                st.session_state.history_file_prec.append(result["file_prec"])
+                st.session_state.history_file_rec.append(result["file_rec"])
+                st.session_state.processed_files.append(short_name)
+                st.success("¡Lote procesado en memoria!")
+            
+            st.session_state.index += 1
+            st.rerun()
 
-        st.session_state.index += 1
+# --- OPCIÓN 2: PROCESAR EN BLOQUE (Ej. 50 archivos) ---
+with btn_col2:
+    num_bloque = st.number_input("Archivos a procesar en ráfaga:", value=50, min_value=1, max_value=100, step=10)
+    if st.button("🚀 Procesar Bloque en Ráfaga"):
+        if idx >= len(blobs):
+            st.success("¡Todos los lotes ya han sido procesados!")
+        else:
+            # Determinamos cuántos archivos procesar sin pasarnos del límite del array
+            archivos_restantes = len(blobs) - idx
+            iteraciones = min(int(num_bloque), archivos_restantes)
+            
+            # Contenedor visual para el progreso de la ráfaga
+            progreso_bar = st.progress(0.0)
+            status_text = st.empty()
+            
+            for i in range(iteraciones):
+                actual_idx = st.session_state.index
+                blob = blobs[actual_idx]
+                short_name = blob.name.split("/")[-1]
+                
+                status_text.markdown(f"⚡ Ráfaga: Procesando {i+1}/{iteraciones} (`{short_name}`)...")
+                
+                # Ejecutamos el entrenamiento del archivo actual
+                result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
+                
+                if result is not None:
+                    st.session_state.history_acc.append(result["global_acc"])
+                    st.session_state.history_prec.append(result["global_prec"])
+                    st.session_state.history_rec.append(result["global_rec"])
+                    st.session_state.history_file_acc.append(result["file_acc"])
+                    st.session_state.history_file_prec.append(result["file_prec"])
+                    st.session_state.history_file_rec.append(result["file_rec"])
+                    st.session_state.processed_files.append(short_name)
+                
+                # Avanzamos el índice global
+                st.session_state.index += 1
+                # Actualizamos la barra de progreso de la UI
+                progreso_bar.progress((i + 1) / iteraciones)
+            
+            status_text.empty()
+            progreso_bar.empty()
+            st.success(f"¡Ráfaga completada! Se procesaron {iteraciones} archivos seguidos en la RAM.")
+            st.rerun()
 
 # =========================================================
 # INDICADORES EN PANTALLA (KPIs)
