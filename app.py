@@ -87,13 +87,22 @@ chunksize = st.sidebar.number_input("Tamaño del Chunk de lectura:", value=5000,
 
 MODEL_PATH = "models/model_incremental.pkl"
 
-# BOTÓN DE GUARDADO MANUAL EN LA BARRA LATERAL
+# --- BOTÓN DE GUARDADO MANUAL EN LA BARRA LATERAL (CORREGIDO) ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("Persistencia del Modelo")
 if st.sidebar.button("💾 Guardar Checkpoint en GCS"):
-    with st.sidebar.spinner("Subiendo modelo pesado a GCS..."):
-        save_model_to_gcs(st.session_state.model, bucket_name, MODEL_PATH)
-# -----------------------------------------------------------------------
+    # 💡 CORRECCIÓN: Usamos st.spinner() de forma global para que funcione nativamente
+    with st.spinner("Subiendo modelo pesado a GCS..."):
+        # Extraemos el objeto de la sesión para evitar referencias cruzadas
+        raw_model = st.session_state.model
+        
+        # Ejecutamos la función de persistencia limpia
+        success = save_model_to_gcs(raw_model, bucket_name, MODEL_PATH)
+        
+        if success:
+            st.sidebar.success("¡Checkpoint guardado exitosamente en GCS!")
+        else:
+            st.sidebar.error("Error al guardar en GCS. Revisa los logs del contenedor.")
 
 # =========================================================
 # INICIALIZAR SESSION STATE (Métricas de Clasificación)
