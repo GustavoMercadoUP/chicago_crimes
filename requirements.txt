@@ -2,7 +2,7 @@
 streamlit==1.38.0
 
 # Librería de aprendizaje incremental
-river==0.22.0
+river==0.21.2
 
 # Dependencias de visualización y manejo de datos
 pandas==2.2.3
