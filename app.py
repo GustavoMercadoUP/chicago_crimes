@@ -143,49 +143,45 @@ metric_rec = st.session_state.metric_rec
 # PREPROCESAMIENTO DE CHUNKS
 # =========================================================
 def preprocess_chunk(df_chunk):
-    # Asegurar que las columnas clave existan antes de procesar
-    cols_needed = ['latitude', 'longitude', 'domestic', 'district']
-    for col in cols_needed:
-        if col not in df_chunk.columns:
-            return pd.DataFrame(), pd.Series()
+    """Aplica todos los pasos de preprocesamiento a un fragmento de DataFrame."""
+    # Clonamos para evitar advertencias de copia en Pandas
+    df_chunk = df_chunk.copy()
 
-    # ✨ SOLUCIÓN AL ERROR: Forzar la conversión a tipo numérico ignorando textos corruptos
+    # 1. Asegurar conversión estricta a numérico de las coordenadas
     df_chunk['latitude'] = pd.to_numeric(df_chunk['latitude'], errors='coerce')
     df_chunk['longitude'] = pd.to_numeric(df_chunk['longitude'], errors='coerce')
 
-    # Eliminar nulos generados por la conversión o los originales
+    # 2. Quitar todos los nulos (incluyendo los generados por errores de conversión)
     df_chunk = df_chunk.dropna(subset=['latitude', 'longitude', 'domestic', 'district']).copy()
-    
-    # Límites geográficos de Chicago
+
+    # 3. Filtrar los registros con base en la latitud y longitud permitida para Chicago
     min_latitude, max_latitude = 41.644, 42.023
     min_longitude, max_longitude = -87.940, -87.524
 
     df_chunk = df_chunk[
-        df_chunk['latitude'].between(min_latitude, max_latitude) &
-        df_chunk['longitude'].between(min_longitude, max_longitude)
+        (df_chunk['latitude'] >= min_latitude) & (df_chunk['latitude'] <= max_latitude) &
+        (df_chunk['longitude'] >= min_longitude) & (df_chunk['longitude'] <= max_longitude)
     ].copy()
 
-    # Procesamiento de fechas
+    # Convertir la columna 'date' a datetime
     df_chunk['date'] = pd.to_datetime(df_chunk['date'], utc=True, errors='coerce')
     df_chunk = df_chunk.dropna(subset=['date']).copy()
 
-    # Extracción de variables de tiempo
+    # 4. Generar columnas de tiempo
     df_chunk['day_of_week'] = df_chunk['date'].dt.day_name()
     df_chunk['month'] = df_chunk['date'].dt.month_name()
     df_chunk['hour_of_day'] = df_chunk['date'].dt.hour.astype(float)
     df_chunk['is_weekend'] = df_chunk['day_of_week'].isin(['Saturday', 'Sunday'])
+
+    # Convertir 'district' a string de forma homogénea
     df_chunk['district'] = df_chunk['district'].astype(str)
 
-    # Columnas finales requeridas para entrenar
+    # Columnas finales requeridas por el ARFClassifier
     features = [
         'primary_type', 'location_description', 'domestic', 'district', 
         'latitude', 'longitude', 'day_of_week', 'month', 'hour_of_day', 'is_weekend'
     ]
     
-    # Devolver un dataframe vacío si el filtrado dejó el lote sin registros válidos
-    if df_chunk.empty:
-        return pd.DataFrame(), pd.Series()
-
     return df_chunk[features], df_chunk['arrest']
 
 # =========================================================
@@ -200,7 +196,6 @@ def process_single_blob(bucket_name, blob_name, limite, chunksize):
                          'domestic', 'district', 'latitude', 'longitude'}
     count = 0
 
-    # Métricas exclusivas para este archivo
     file_acc = metrics.Accuracy()
     file_prec = metrics.Precision()
     file_rec = metrics.Recall()
@@ -209,46 +204,50 @@ def process_single_blob(bucket_name, blob_name, limite, chunksize):
         content = blob.download_as_bytes()
         buffer = io.BytesIO(content)
 
-        for chunk in pd.read_csv(buffer, chunksize=chunksize, low_memory=False):
+        # 💡 SOLUCIÓN: Leemos latitude y longitude como strings inicialmente para evitar el quiebre de tipos
+        for chunk in pd.read_csv(buffer, chunksize=chunksize, low_memory=False, 
+                                 dtype={'latitude': str, 'longitude': str, 'district': str}):
+            
             if not expected_raw_cols.issubset(set(chunk.columns)):
                 continue
 
+            # El preprocesamiento ahora se encarga de limpiar y convertir a números de forma segura
             X_chunk, y_chunk = preprocess_chunk(chunk)
-            
-            # CONTROL DE SEGURIDAD: Si el lote quedó vacío tras la limpieza, saltar al siguiente chunk
+
             if X_chunk.empty:
                 continue
-    
+
             for idx, row in X_chunk.iterrows():
                 if count >= limite:
                     break
 
-                # Formateo estricto de tipos nativos para River
-                x = row.to_dict()
-                x['domestic'] = bool(x['domestic'])
-                x['is_weekend'] = bool(x['is_weekend'])
-                y = bool(y_chunk.loc[idx])
+                try:
+                    x = row.to_dict()
+                    x['domestic'] = bool(x['domestic'])
+                    x['is_weekend'] = bool(x['is_weekend'])
+                    
+                    y = bool(y_chunk.loc[idx])
 
-                # 1. Predict-then-Learn
-                y_pred = model.predict_one(x)
-                
-                # River inicializa en None la primera predicción
-                if y_pred is None:
-                    y_pred = False 
+                    # Predict-then-Learn
+                    y_pred = model.predict_one(x)
+                    if y_pred is None:
+                        y_pred = False 
 
-                model.learn_one(x, y)
+                    model.learn_one(x, y)
 
-                # 2. Actualizar métricas acumuladas globales
-                metric_acc.update(y, y_pred)
-                metric_prec.update(y, y_pred)
-                metric_rec.update(y, y_pred)
+                    # Actualizar métricas globales
+                    metric_acc.update(y, y_pred)
+                    metric_prec.update(y, y_pred)
+                    metric_rec.update(y, y_pred)
 
-                # 3. Actualizar métricas locales del archivo
-                file_acc.update(y, y_pred)
-                file_prec.update(y, y_pred)
-                file_rec.update(y, y_pred)
+                    # Actualizar métricas del archivo
+                    file_acc.update(y, y_pred)
+                    file_prec.update(y, y_pred)
+                    file_rec.update(y, y_pred)
 
-                count += 1
+                    count += 1
+                except Exception:
+                    continue
 
             if count >= limite:
                 break
