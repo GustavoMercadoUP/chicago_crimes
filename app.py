@@ -29,15 +29,25 @@ identificador bigquery-public-data.chicago_crime.crime.
 # =========================================================
 # FUNCIONES AUXILIARES GCS
 # =========================================================
-def save_model_to_gcs(model, bucket_name, destination_blob):
+def save_model_to_gcs(model_to_save, bucket_name, destination_blob):
+    """Guarda el modelo en GCS mediante streaming de archivos para soportar pesos altos."""
     try:
+        # Instanciar el cliente nativo de Google Cloud Storage
         client = storage.Client()
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(destination_blob)
-        blob.upload_from_string(pickle.dumps(model))
-        st.success(f"Checkpoint guardado en GCS: `{destination_blob}`")
+        
+        # 💡 SOLUCIÓN REAL: Abrir un canal de streaming binario directo con el Blob de GCS
+        # Esto fragmenta automáticamente el modelo pesado durante la transferencia
+        with blob.open("wb", content_type="application/octet-stream") as f:
+            pickle.dump(model_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+        print(f"✅ Checkpoint pesado guardado con éxito vía Streaming en: gs://{bucket_name}/{destination_blob}")
+        return True
     except Exception as e:
-        st.warning(f"No se pudo respaldar el modelo en GCS: {e}")
+        # Este mensaje detallado aparecerá en la consola de Logs de Cloud Run para auditoría
+        print(f"❌ Error crítico en streaming hacia GCS: {e}")
+        return False
 
 def load_model_from_gcs(bucket_name, source_blob):
     try:
