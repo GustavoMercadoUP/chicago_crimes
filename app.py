@@ -77,9 +77,17 @@ st.sidebar.header("Configuración de Datos")
 bucket_name = st.sidebar.text_input("Bucket de GCS:", "bucket-ml-bd-gusmercado")
 prefix = st.sidebar.text_input("Prefijo/Carpeta:", "chicago_crime/")
 limite = st.sidebar.number_input("Muestras por archivo (Límite):", value=5000, step=500)
-chunksize = st.sidebar.number_input("Tamaño del Chunk de lectura:", value=500, step=100)
+chunksize = st.sidebar.number_input("Tamaño del Chunk de lectura:", value=5000, step=500) 
 
 MODEL_PATH = "models/model_incremental.pkl"
+
+# BOTÓN DE GUARDADO MANUAL EN LA BARRA LATERAL
+st.sidebar.markdown("---")
+st.sidebar.subheader("Persistencia del Modelo")
+if st.sidebar.button("💾 Guardar Checkpoint en GCS"):
+    with st.sidebar.spinner("Subiendo modelo pesado a GCS..."):
+        save_model_to_gcs(st.session_state.model, bucket_name, MODEL_PATH)
+# -----------------------------------------------------------------------
 
 # =========================================================
 # INICIALIZAR SESSION STATE (Métricas de Clasificación)
@@ -283,8 +291,10 @@ if st.button("Procesar Siguiente Archivo ➡️"):
 
             st.session_state.processed_files.append(short_name)
             
-            # Persistencia inmediata en la nube
-            save_model_to_gcs(model, bucket_name, MODEL_PATH)
+            # 💡 ELIMINADO: Ya no guardamos en GCS aquí. 
+            # El modelo ahora entrena 100% en la RAM ultra rápida de 8GiB.
+            st.success("¡Lote procesado en memoria! Recuerda guardar el checkpoint desde la barra lateral al terminar.")
+            
         else:
             st.warning("El archivo actual no contenía registros válidos tras la limpieza.")
 
