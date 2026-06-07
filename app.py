@@ -10,14 +10,20 @@ from river import forest, metrics
 # =========================================================
 # CONFIGURACIÓN DE PÁGINA
 # =========================================================
-st.set_page_config(page_title="Predicción de Arrestos - Chicago", page_icon="🚨", layout="wide")
-st.title("🚨 Aprendizaje en Línea: Crímenes de Chicago")
+st.set_page_config(page_title="Predicción de Arrestos - Chicago", page_icon="👮🏽‍♂️", layout="wide")
+st.title("Aprendizaje en Línea: Crímenes de Chicago 👮🏽‍♂️")
 
 st.markdown("""
 Este panel interactivo entrena un modelo **Adaptive Random Forest Classifier** de forma incremental,
 procesando los datos históricos de crímenes de Chicago **un archivo por clic** desde Google Cloud Storage (GCS).
 
 **Enfoque Online:** Por cada registro, el modelo primero predice si habrá un arresto (`Predict`) y luego aprende de la realidad (`Learn`).
+
+Los datos provienen del sistema CLEAR (Citizen Law Enforcement Analysis and Reporting) del Departamento de Policía de Chicago (CPD). 
+Se encuentran alojados de forma pública en el Portal de Datos Abiertos de la Ciudad de Chicago (Chicago Data Portal) y está 
+disponible para su consulta masiva mediante la base de datos pública de Google BigQuery bajo el 
+identificador bigquery-public-data.chicago_crime.crime.
+
 """)
 
 # =========================================================
