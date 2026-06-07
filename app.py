@@ -112,15 +112,11 @@ if "model" not in st.session_state:
     st.session_state.metric_prec = metrics.Precision()
     st.session_state.metric_rec = metrics.Recall()
 
-    st.session_state.history_acc = []
-    st.session_state.history_prec = []
-    st.session_state.history_rec = []
-    
-    st.session_state.history_file_acc = []
-    st.session_state.history_file_prec = []
-    st.session_state.history_file_rec = []
-    
+    # Una sola estructura limpia para almacenar el histórico de tuplas
+    st.session_state.history = []
+    st.session_state.history_file = []
     st.session_state.processed_files = []
+    
     st.session_state.blobs = None
     st.session_state.index = 0
 
@@ -131,18 +127,13 @@ if st.sidebar.button("Reiniciar Modelo y Borrar Historial"):
     st.session_state.metric_acc = metrics.Accuracy()
     st.session_state.metric_prec = metrics.Precision()
     st.session_state.metric_rec = metrics.Recall()
-    st.session_state.history_acc = []
-    st.session_state.history_prec = []
-    st.session_state.history_rec = []
-    st.session_state.history_file_acc = []
-    st.session_state.history_file_prec = []
-    st.session_state.history_file_rec = []
+    st.session_state.history = []
+    st.session_state.history_file = []
     st.session_state.processed_files = []
     st.session_state.blobs = None
     st.session_state.index = 0
     st.rerun()
 
-# Variables globales de la sesión para simplificar llamadas
 model = st.session_state.model
 metric_acc = st.session_state.metric_acc
 metric_prec = st.session_state.metric_prec
@@ -261,7 +252,6 @@ def process_single_blob(bucket_name, blob_name, limite, chunksize):
 # =========================================================
 st.subheader("Flujo de Simulación en Tiempo Real")
 
-# Inicializar los blobs si no existen en la sesión
 if st.session_state.blobs is None:
     client = storage.Client()
     bucket = client.bucket(bucket_name)
@@ -273,14 +263,13 @@ if st.session_state.blobs is None:
 blobs = st.session_state.blobs
 idx = st.session_state.index
 
-# Creamos dos columnas para colocar los botones lado a lado
 btn_col1, btn_col2 = st.columns(2)
 
 # --- OPCIÓN 1: PROCESAR UN SOLO ARCHIVO ---
 with btn_col1:
     if st.button("Procesar Siguiente Archivo ➡️"):
         if idx >= len(blobs):
-            st.success("¡Todos los lotes de crímenes han sido procesados con éxito!")
+            st.success("¡Todos los lotes de crímenes han sido procesados!")
         else:
             blob = blobs[idx]
             short_name = blob.name.split("/")[-1]
@@ -290,60 +279,50 @@ with btn_col1:
                 result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
             
             if result is not None:
-                st.session_state.history_acc.append(result["global_acc"])
-                st.session_state.history_prec.append(result["global_prec"])
-                st.session_state.history_rec.append(result["global_rec"])
-                st.session_state.history_file_acc.append(result["file_acc"])
-                st.session_state.history_file_prec.append(result["file_prec"])
-                st.session_state.history_file_rec.append(result["file_rec"])
+                # Guardamos las tuplas globales y locales
+                st.session_state.history.append((result["global_acc"], result["global_prec"], result["global_rec"]))
+                st.session_state.history_file.append((result["file_acc"], result["file_prec"], result["file_rec"]))
                 st.session_state.processed_files.append(short_name)
                 st.success("¡Lote procesado en memoria!")
             
             st.session_state.index += 1
             st.rerun()
 
-# --- OPCIÓN 2: PROCESAR EN BLOQUE (Ej. 50 archivos) ---
+# --- OPCIÓN 2: PROCESAR EN BLOQUE (RÁFAGA DE 50) ---
 with btn_col2:
     num_bloque = st.number_input("Archivos a procesar en ráfaga:", value=50, min_value=1, max_value=100, step=10)
     if st.button("🚀 Procesar Bloque en Ráfaga"):
         if idx >= len(blobs):
             st.success("¡Todos los lotes ya han sido procesados!")
         else:
-            # Determinamos cuántos archivos procesar sin pasarnos del límite del array
             archivos_restantes = len(blobs) - idx
             iteraciones = min(int(num_bloque), archivos_restantes)
             
-            # Contenedor visual para el progreso de la ráfaga
             progreso_bar = st.progress(0.0)
             status_text = st.empty()
             
             for i in range(iteraciones):
                 actual_idx = st.session_state.index
+                if actual_idx >= len(blobs):
+                    break
                 blob = blobs[actual_idx]
                 short_name = blob.name.split("/")[-1]
                 
                 status_text.markdown(f"⚡ Ráfaga: Procesando {i+1}/{iteraciones} (`{short_name}`)...")
                 
-                # Ejecutamos el entrenamiento del archivo actual
                 result = process_single_blob(bucket_name, blob.name, int(limite), int(chunksize))
                 
                 if result is not None:
-                    st.session_state.history_acc.append(result["global_acc"])
-                    st.session_state.history_prec.append(result["global_prec"])
-                    st.session_state.history_rec.append(result["global_rec"])
-                    st.session_state.history_file_acc.append(result["file_acc"])
-                    st.session_state.history_file_prec.append(result["file_prec"])
-                    st.session_state.history_file_rec.append(result["file_rec"])
+                    # Guardamos la tupla en la ráfaga de forma idéntica
+                    st.session_state.history.append((result["global_acc"], result["global_prec"], result["global_rec"]))
+                    st.session_state.history_file.append((result["file_acc"], result["file_prec"], result["file_rec"]))
                     st.session_state.processed_files.append(short_name)
                 
-                # Avanzamos el índice global
                 st.session_state.index += 1
-                # Actualizamos la barra de progreso de la UI
                 progreso_bar.progress((i + 1) / iteraciones)
             
             status_text.empty()
             progreso_bar.empty()
-            st.success(f"¡Ráfaga completada! Se procesaron {iteraciones} archivos seguidos en la RAM.")
             st.rerun()
 
 # =========================================================
@@ -358,26 +337,33 @@ col4.metric("Recall Acumulado", f"{metric_rec.get():.4f}")
 # =========================================================
 # SECCIÓN GRÁFICA DEL HISTORIAL (Evolución en el Tiempo)
 # =========================================================
-if st.session_state.history_acc:
-    # 1. Creamos un DataFrame con todo el histórico acumulado en la sesión
+if st.session_state.history and len(st.session_state.processed_files) > 0:
+    
+    # Reconstruimos las listas individuales para el DataFrame a partir de las tuplas guardadas
+    accuracies_global = [h[0] for h in st.session_state.history]
+    precisions_global = [h[1] for h in st.session_state.history]
+    recalls_global = [h[2] for h in st.session_state.history]
+
+    accuracies_local = [h[0] for h in st.session_state.history_file]
+    precisions_local = [h[1] for h in st.session_state.history_file]
+    recalls_local = [h[2] for h in st.session_state.history_file]
+
+    # Asegurar alineación de índices por seguridad en la UI
+    min_len = min(len(st.session_state.processed_files), len(st.session_state.history))
+    
     df_metrics = pd.DataFrame({
-        "Lote/Archivo": st.session_state.processed_files,
-        "Accuracy (Global)": st.session_state.history_acc,
-        "Precision (Global)": st.session_state.history_prec,
-        "Recall (Global)": st.session_state.history_rec,
-        "Accuracy (Este Lote)": st.session_state.history_file_acc,
-        "Precision (Este Lote)": st.session_state.history_file_prec,
-        "Recall (Este Lote)": st.session_state.history_file_rec,
+        "Lote/Archivo": st.session_state.processed_files[:min_len],
+        "Accuracy (Global)": accuracies_global[:min_len],
+        "Precision (Global)": precisions_global[:min_len],
+        "Recall (Global)": recalls_global[:min_len],
+        "Accuracy (Este Lote)": accuracies_local[:min_len],
+        "Precision (Este Lote)": precisions_local[:min_len],
+        "Recall (Este Lote)": recalls_local[:min_len],
     })
 
     st.markdown("---")
     st.subheader("📈 Monitoreo de Aprendizaje Continuo")
-    st.markdown("""
-    Estas gráficas muestran el comportamiento del modelo a lo largo del tiempo. 
-    El eje **X** representa el orden secuencial en el que los archivos CSV fueron leídos de GCS.
-    """)
 
-    # 2. Organizamos los gráficos en pestañas para una interfaz más limpia
     tab1, tab2, tab3 = st.tabs([
         "📊 Métricas Acumuladas (Histórico)", 
         "⚡ Desempeño por Lote Aislado", 
@@ -386,23 +372,19 @@ if st.session_state.history_acc:
     
     with tab1:
         st.markdown("#### Evolución de Métricas Globales Acumuladas")
-        st.caption("Muestra la estabilidad general del modelo desde el inicio del entrenamiento hasta el momento actual.")
-        # Graficamos las métricas globales indexando por el nombre del archivo
         st.line_chart(
             df_metrics.set_index("Lote/Archivo")[["Accuracy (Global)", "Precision (Global)", "Recall (Global)"]],
-            color=["#2ca02c", "#1f77b4", "#ff7f0e"] # Verde, Azul, Naranja
+            color=["#2ca02c", "#1f77b4", "#ff7f0e"]
         )
         
     with tab2:
         st.markdown("#### Comportamiento del Modelo en el Lote Actual")
-        st.caption("Ideal para detectar variaciones drásticas o 'Concept Drift' en archivos específicos.")
         st.line_chart(
             df_metrics.set_index("Lote/Archivo")[["Accuracy (Este Lote)", "Precision (Este Lote)", "Recall (Este Lote)"]],
-            color=["#4ade80", "#60a5fa", "#f87171"] # Versiones más brillantes para diferenciar
+            color=["#4ade80", "#60a5fa", "#f87171"]
         )
         
     with tab3:
-        st.markdown("#### Historial Registrado")
         st.dataframe(df_metrics, use_container_width=True)
 
 else:
