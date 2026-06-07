@@ -310,29 +310,57 @@ col3.metric("Precision Acumulada", f"{metric_prec.get():.4f}")
 col4.metric("Recall Acumulado", f"{metric_rec.get():.4f}")
 
 # =========================================================
-# SECCIÓN GRÁFICA DEL HISTORIAL
+# SECCIÓN GRÁFICA DEL HISTORIAL (Evolución en el Tiempo)
 # =========================================================
 if st.session_state.history_acc:
+    # 1. Creamos un DataFrame con todo el histórico acumulado en la sesión
     df_metrics = pd.DataFrame({
-        "Archivo/Lote": st.session_state.processed_files,
+        "Lote/Archivo": st.session_state.processed_files,
         "Accuracy (Global)": st.session_state.history_acc,
         "Precision (Global)": st.session_state.history_prec,
         "Recall (Global)": st.session_state.history_rec,
-        "Accuracy (Lote)": st.session_state.history_file_acc,
-        "Precision (Lote)": st.session_state.history_file_prec,
-        "Recall (Lote)": st.session_state.history_file_rec,
+        "Accuracy (Este Lote)": st.session_state.history_file_acc,
+        "Precision (Este Lote)": st.session_state.history_file_prec,
+        "Recall (Este Lote)": st.session_state.history_file_rec,
     })
 
     st.markdown("---")
-    st.subheader("Evolución del Rendimiento del Modelo")
-    
-    tab1, tab2, tab3 = st.tabs(["Métricas Acumuladas", "Métricas por Lote Aislado", "Tabla de Datos"])
+    st.subheader("📈 Monitoreo de Aprendizaje Continuo")
+    st.markdown("""
+    Estas gráficas muestran el comportamiento del modelo a lo largo del tiempo. 
+    El eje **X** representa el orden secuencial en el que los archivos CSV fueron leídos de GCS.
+    """)
+
+    # 2. Organizamos los gráficos en pestañas para una interfaz más limpia
+    tab1, tab2, tab3 = st.tabs([
+        "📊 Métricas Acumuladas (Histórico)", 
+        "⚡ Desempeño por Lote Aislado", 
+        "📋 Tabla de Datos Real"
+    ])
     
     with tab1:
-        st.line_chart(df_metrics.set_index("Archivo/Lote")[["Accuracy (Global)", "Precision (Global)", "Recall (Global)"]])
+        st.markdown("#### Evolución de Métricas Globales Acumuladas")
+        st.caption("Muestra la estabilidad general del modelo desde el inicio del entrenamiento hasta el momento actual.")
+        # Graficamos las métricas globales indexando por el nombre del archivo
+        st.line_chart(
+            df_metrics.set_index("Lote/Archivo")[["Accuracy (Global)", "Precision (Global)", "Recall (Global)"]],
+            color=["#2ca02c", "#1f77b4", "#ff7f0e"] # Verde, Azul, Naranja
+        )
+        
     with tab2:
-        st.line_chart(df_metrics.set_index("Archivo/Lote")[["Accuracy (Lote)", "Precision (Lote)", "Recall (Lote)"]])
+        st.markdown("#### Comportamiento del Modelo en el Lote Actual")
+        st.caption("Ideal para detectar variaciones drásticas o 'Concept Drift' en archivos específicos.")
+        st.line_chart(
+            df_metrics.set_index("Lote/Archivo")[["Accuracy (Este Lote)", "Precision (Este Lote)", "Recall (Este Lote)"]],
+            color=["#4ade80", "#60a5fa", "#f87171"] # Versiones más brillantes para diferenciar
+        )
+        
     with tab3:
+        st.markdown("#### Historial Registrado")
         st.dataframe(df_metrics, use_container_width=True)
+
+else:
+    st.markdown("---")
+    st.info("💡 Las gráficas de evolución aparecerán aquí en tiempo real en cuanto proceses el primer archivo CSV.")
 
 st.caption("Ecosistema: Cloud Run • River ML • Chicago Crime Dataset Abierto")
